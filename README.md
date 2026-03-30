@@ -1,3 +1,12 @@
+---
+title: SOC Analyst Env
+emoji: 🛡️
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+---
+
 # SOC Analyst Incident Triage Environment
 
 A real-world OpenEnv environment where an AI agent acts as a Tier 1 Security Operations Center (SOC) analyst. The agent must triage incoming security alerts by gathering evidence from simulated logs, threat intelligence, and asset databases before making a final resolution.
