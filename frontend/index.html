@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SOC Analyst Environment Demo</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --panel: #161b22;
+            --border: #30363d;
+            --text: #c9d1d9;
+            --primary: #58a6ff;
+            --success: #2ea043;
+            --danger: #f85149;
+            --warning: #d29922;
+            --muted: #8b949e;
+        }
+
+        * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Sidebar */
+        #sidebar {
+            width: 320px;
+            background: var(--panel);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            gap: 20px;
+        }
+
+        .section {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .section-title {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: var(--muted);
+            font-weight: bold;
+            letter-spacing: 0.5px;
+        }
+
+        select, button, input {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        select:focus, input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        button {
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 500;
+        }
+
+        button:hover { background: #1f2428; }
+
+        .btn-primary {
+            background: var(--primary);
+            color: #000;
+            border: none;
+        }
+        .btn-primary:hover { background: #3182ce; }
+
+        .btn-success { background: var(--success); color: white; border: none; }
+        .btn-success:hover { background: #238636; }
+
+        .btn-danger { background: var(--danger); color: white; border: none; }
+        .btn-danger:hover { background: #da3633; }
+
+        .info-card {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 15px;
+            font-size: 13px;
+        }
+
+        /* Main Workspace */
+        #workspace {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        #logs {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .log-entry {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-left: 4px solid var(--muted);
+            padding: 15px;
+            border-radius: 6px;
+        }
+
+        .log-entry.agent { border-left-color: var(--primary); }
+        .log-entry.system { border-left-color: var(--warning); }
+        .log-entry.reward { border-left-color: var(--success); }
+
+        .log-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+            font-size: 13px;
+            color: var(--muted);
+        }
+
+        /* Controls */
+        #controls {
+            padding: 20px;
+            background: var(--panel);
+            border-top: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .action-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .action-row .btn-group {
+            display: flex;
+            gap: 5px;
+        }
+        
+        pre {
+            margin: 0;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 13px;
+        }
+
+        .evidence-tag {
+            display: inline-block;
+            background: #238636;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            margin-right: 5px;
+            margin-bottom: 5px;
+        }
+        
+        .score-badge {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-weight: bold;
+            color: var(--primary);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Sidebar -->
+    <div id="sidebar">
+        <div class="section">
+            <div class="section-title">Scenario Control</div>
+            <select id="difficulty">
+                <option value="easy">Easy (Brute Force)</option>
+                <option value="medium">Medium (Emotet Malware)</option>
+                <option value="hard">Hard (Impossible Travel)</option>
+            </select>
+            <button class="btn-primary" onclick="resetEnvironment()">Start Triage</button>
+        </div>
+
+        <div class="section">
+            <div class="section-title">Alert Details</div>
+            <div class="info-card" id="alert-details">
+                <em>No active alert. Start triage to receive one.</em>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">Evidence Collected</div>
+            <div class="info-card" id="evidence-panel">
+                <em>None</em>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Workspace -->
+    <div id="workspace">
+        <div id="header">
+            <h2 style="margin:0;">SOC Analyst Terminal</h2>
+            <div class="score-badge">Steps Left: <span id="steps-left">-</span> | Score: <span id="score">0.0</span></div>
+        </div>
+
+        <div id="logs">
+            <div class="log-entry system">
+                <div class="log-title">SYSTEM INIT</div>
+                <div>Welcome to the SOC Analyst Environment. Select a difficulty and click "Start Triage".</div>
+            </div>
+        </div>
+
+        <!-- Action Controls -->
+        <div id="controls" style="opacity: 0.5; pointer-events: none;">
+            <div class="action-row">
+                <div class="btn-group">
+                    <button onclick="setActionMode('search_logs')">Search Logs</button>
+                    <button onclick="setActionMode('get_threat_intel')">Threat Intel</button>
+                    <button onclick="setActionMode('get_asset_info')">Asset Info</button>
+                </div>
+            </div>
+            
+            <div class="action-row" id="query-input-row" style="display:none;">
+                <input type="text" id="action-input" placeholder="Enter IP, hash, or hostname..." style="flex:1;">
+                <button class="btn-primary" onclick="submitQueryAction()">Execute Query</button>
+            </div>
+
+            <div class="section-title" style="margin-top:10px;">Final Resolution (Ends Episode)</div>
+            <div class="action-row">
+                <button class="btn-success" onclick="takeAction('false_positive')">False Positive</button>
+                <button class="btn-warning" onclick="takeAction('escalate_tier2')">Escalate to Tier 2</button>
+                <button class="btn-danger" onclick="takeAction('block_if_malicious')">Block Malicious</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentActionMode = "";
+
+        function addLog(title, message, type="system") {
+            const logs = document.getElementById("logs");
+            const entry = document.createElement("div");
+            entry.className = `log-entry ${type}`;
+            entry.innerHTML = `<div class="log-title">${title}</div><pre>${message}</pre>`;
+            logs.appendChild(entry);
+            logs.scrollTop = logs.scrollHeight;
+        }
+
+        function updateStateWindow(obs) {
+            if(obs.alert_details) {
+                document.getElementById("alert-details").innerHTML = `<pre>${JSON.stringify(obs.alert_details, null, 2)}</pre>`;
+            }
+            
+            if(obs.evidence_collected) {
+                const evidenceHtml = obs.evidence_collected.length > 0 
+                    ? obs.evidence_collected.map(e => `<span class="evidence-tag">${e}</span>`).join('')
+                    : "<em>None</em>";
+                document.getElementById("evidence-panel").innerHTML = evidenceHtml;
+            }
+
+            document.getElementById("steps-left").innerText = obs.remaining_steps;
+            document.getElementById("score").innerText = obs.score.toFixed(1);
+
+            if (obs.done) {
+                document.getElementById("controls").style.opacity = "0.5";
+                document.getElementById("controls").style.pointerEvents = "none";
+            }
+        }
+
+        async function resetEnvironment() {
+            const difficulty = document.getElementById("difficulty").value;
+            document.getElementById("logs").innerHTML = "";
+            addLog("SYSTEM", `Initializing new ${difficulty} alert...`);
+
+            try {
+                const response = await fetch("/reset", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({
+                        difficulty: difficulty
+                    })
+                });
+                
+                const data = await response.json();
+                const obs = data.observation;
+                
+                addLog("ENVIRONMENT", obs.message, "system");
+                updateStateWindow(obs);
+                
+                document.getElementById("controls").style.opacity = "1";
+                document.getElementById("controls").style.pointerEvents = "auto";
+                document.getElementById("query-input-row").style.display = "none";
+
+            } catch (err) {
+                addLog("ERROR", err.toString(), "danger");
+            }
+        }
+
+        function setActionMode(mode) {
+            currentActionMode = mode;
+            document.getElementById("query-input-row").style.display = "flex";
+            const input = document.getElementById("action-input");
+            if (mode === "search_logs") input.placeholder = "Enter IP or Username for logs...";
+            if (mode === "get_threat_intel") input.placeholder = "Enter IP or Hash for reputation...";
+            if (mode === "get_asset_info") input.placeholder = "Enter Hostname or Username...";
+            input.focus();
+        }
+
+        async function submitQueryAction() {
+            const val = document.getElementById("action-input").value;
+            if(!val) return;
+
+            let actionObj = { action_type: currentActionMode };
+            if (currentActionMode === "search_logs") actionObj.query = val;
+            if (currentActionMode === "get_threat_intel") actionObj.indicator = val;
+            if (currentActionMode === "get_asset_info") actionObj.hostname_or_user = val;
+
+            await sendStep(actionObj);
+            document.getElementById("action-input").value = "";
+        }
+
+        async function takeAction(decision) {
+            const actionObj = {
+                action_type: "take_action",
+                decision: decision,
+                reason: "Manual triage via UI"
+            };
+            await sendStep(actionObj);
+        }
+
+        async function sendStep(actionObj) {
+            addLog("AGENT ACTION", JSON.stringify(actionObj, null, 2), "agent");
+
+            try {
+                const response = await fetch("/step", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({ action: actionObj })
+                });
+                
+                const data = await response.json();
+                const obs = data.observation;
+                
+                let logType = "system";
+                if(data.reward > 0) logType = "reward";
+                if(obs.done) logType = (data.reward > 0) ? "reward" : "system";
+
+                addLog("ENVIRONMENT", obs.message + (data.reward ? `\n[Reward: +${data.reward}]` : ""), logType);
+                updateStateWindow(obs);
+
+            } catch (err) {
+                addLog("ERROR", err.toString(), "danger");
+            }
+        }
+    </script>
+</body>
+</html>
