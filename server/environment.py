@@ -24,7 +24,7 @@ class SocAnalystEnvironment(Environment):
             difficulty=difficulty,
             remaining_steps=self.MAX_STEPS,
             evidence_collected=[],
-            score=0.0
+            score=0.01
         )
 
         if difficulty == "easy":
@@ -115,12 +115,13 @@ class SocAnalystEnvironment(Environment):
                     self._state.score = 0.1
                 else:
                     message = f"Correctly resolved alert as {action.decision}."
-                    reward = 1.0
-                    self._state.score = 1.0
+                    reward = 0.99
+                    self._state.score = 0.99
             else:
                 message = f"Incorrect decision: {action.decision}. Expected: {self._state.expected_decision}."
                 reward = -0.5
-                self._state.score = 0.0
+                # Keep task scores strictly within (0, 1) for OpenEnv validators.
+                self._state.score = 0.01
         
         else:
             message = f"Unknown action type: {at}"
@@ -129,7 +130,7 @@ class SocAnalystEnvironment(Environment):
             done = True
             message = "Max steps reached without a decision. You failed to triage the alert."
             reward = 0.0
-            self._state.score = 0.0
+            self._state.score = 0.01
             
         return SocObservation(
             message=message,
