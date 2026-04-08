@@ -6,6 +6,12 @@ from openai import OpenAI
 from server.environment import SocAnalystEnvironment
 from models import SocAction
 
+# Checklist-compliant environment configuration
+API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
+HF_TOKEN = os.getenv("HF_TOKEN")
+LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
+
 def run_inference(task_difficulty: str):
     """Run a single task and print structured [START]/[STEP]/[END] output."""
 
@@ -15,9 +21,9 @@ def run_inference(task_difficulty: str):
     print(f"[START] task={task_name}", flush=True)
 
     # Initialize LLM client
-    api_key = os.environ.get("OPENAI_API_KEY", os.environ.get("HF_TOKEN"))
-    api_base = os.environ.get("API_BASE_URL")
-    model_name = os.environ.get("MODEL_NAME", "gpt-4o-mini")
+    api_key = HF_TOKEN
+    api_base = API_BASE_URL
+    model_name = MODEL_NAME
 
     client = OpenAI(
         api_key=api_key,
@@ -99,9 +105,9 @@ Always gather evidence using search_logs, get_threat_intel, and get_asset_info b
 
 
 if __name__ == "__main__":
-    if not os.environ.get("OPENAI_API_KEY") and not os.environ.get("HF_TOKEN"):
+    if not HF_TOKEN:
         print(
-            "Warning: Neither OPENAI_API_KEY nor HF_TOKEN is set. API calls may fail.",
+            "Warning: HF_TOKEN is not set. API calls may fail.",
             file=sys.stderr,
             flush=True,
         )
