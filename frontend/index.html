@@ -257,6 +257,7 @@
 
     <script>
         let currentActionMode = "";
+        let currentEpisodeId = "";
 
         function addLog(title, message, type="system") {
             const logs = document.getElementById("logs");
@@ -280,7 +281,8 @@
             }
 
             document.getElementById("steps-left").innerText = obs.remaining_steps;
-            document.getElementById("score").innerText = obs.score.toFixed(1);
+            const score = Number(obs.score ?? 0);
+            document.getElementById("score").innerText = Number.isFinite(score) ? score.toFixed(2) : "0.00";
 
             if (obs.done) {
                 document.getElementById("controls").style.opacity = "0.5";
@@ -304,6 +306,7 @@
                 
                 const data = await response.json();
                 const obs = data.observation;
+                currentEpisodeId = data.episode_id || data.state?.episode_id || "";
                 
                 addLog("ENVIRONMENT", obs.message, "system");
                 updateStateWindow(obs);
@@ -356,7 +359,10 @@
                 const response = await fetch("/step", {
                     method: "POST",
                     headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({ action: actionObj })
+                    body: JSON.stringify({
+                        action: actionObj,
+                        ...(currentEpisodeId ? { episode_id: currentEpisodeId } : {})
+                    })
                 });
                 
                 const data = await response.json();

@@ -25,4 +25,4 @@ class SocState(State):
     # Ground truth answers for grading
     expected_decision: str = ""
     # Whether episode ended successfully
-    score: float = 0.0
+    score: float = 0.01
