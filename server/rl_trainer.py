@@ -107,7 +107,8 @@ def _parse_spl(text: str, fallback: str) -> str:
 
 def _sample_text(trainer: Any, tokenizer: AutoTokenizer, prompt: str, device: str, max_new_tokens: int) -> Tuple[torch.Tensor, torch.Tensor, str]:
     query_tensors = tokenizer(prompt, return_tensors="pt").input_ids.to(device)
-    generated = trainer.model.generate(query_tensors, max_new_tokens=max_new_tokens, do_sample=True)
+    model_obj = trainer.model if hasattr(trainer, "model") else trainer
+    generated = model_obj.generate(query_tensors, max_new_tokens=max_new_tokens, do_sample=True)
     response_tensors = generated[:, query_tensors.shape[1] :]
     text = tokenizer.decode(generated[0], skip_special_tokens=True)
     return query_tensors, response_tensors, text
@@ -527,7 +528,8 @@ def run_training_loop(
         TRAINING_STATUS.campaign_progress = round(aggregate_campaign_progress / denom, 4)
         TRAINING_STATUS.delayed_reward_success_rate = round(delayed_reward_positive_count / denom, 4)
 
-        trainer.model.save_pretrained(str(output_dir))
+        trainer_model = trainer.model if hasattr(trainer, "model") else trainer
+        trainer_model.save_pretrained(str(output_dir))
         tokenizer.save_pretrained(str(output_dir))
         if role_trainers is not None:
             role_dir = output_dir / "role_policies"
@@ -567,7 +569,8 @@ def run_training_loop(
             repo_id = os.getenv("HF_REPO_ID")
             if hf_token and repo_id:
                 login(token=hf_token)
-                trainer.model.push_to_hub(repo_id)
+                trainer_model = trainer.model if hasattr(trainer, "model") else trainer
+                trainer_model.push_to_hub(repo_id)
                 tokenizer.push_to_hub(repo_id)
                 TRAINING_STATUS.last_message = f"Training complete. Model and report pushed to {repo_id}."
             else:
