@@ -7,10 +7,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 sys.path.insert(0, os.path.dirname(__file__))
 
 from openenv.core.env_server import create_fastapi_app
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, File, UploadFile
 from fastapi.responses import FileResponse
 from environment import SocAnalystEnvironment
 from models import SocAction, SocObservation
+from server.datasets import (
+    add_logs_from_content,
+    clear_uploaded_logs,
+    search_uploaded_logs,
+    uploaded_logs_summary,
+)
 from server.integrations import SplunkClient, SplunkConfig, set_splunk_client
 
 try:
@@ -60,6 +66,34 @@ def configure_splunk(config: SplunkConfig):
         return {"ok": True, "message": "Splunk integration configured."}
     except Exception as exc:
         return {"ok": False, "message": f"Failed to configure Splunk: {exc}"}
+
+
+@app.post("/api/datasets/logs/upload")
+async def upload_logs(file: UploadFile = File(...)):
+    content = await file.read()
+    inserted = add_logs_from_content(file.filename or "uploaded.log", content)
+    return {
+        "ok": True,
+        "message": f"Uploaded {inserted} log entries from {file.filename}.",
+        "summary": uploaded_logs_summary(),
+    }
+
+
+@app.post("/api/datasets/logs/clear")
+def clear_logs():
+    clear_uploaded_logs()
+    return {"ok": True, "message": "Uploaded logs cleared.", "summary": uploaded_logs_summary()}
+
+
+@app.get("/api/datasets/logs/search")
+def search_logs(query: str = "", max_results: int = 20):
+    rows = search_uploaded_logs(query, max_results=max_results)
+    return {"ok": True, "query": query, "count": len(rows), "rows": rows, "summary": uploaded_logs_summary()}
+
+
+@app.get("/api/datasets/logs/summary")
+def logs_summary():
+    return {"ok": True, "summary": uploaded_logs_summary()}
 
 
 @app.post("/api/train")

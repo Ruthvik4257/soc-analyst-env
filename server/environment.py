@@ -7,6 +7,7 @@ from openenv.core.env_server import Environment
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from models import AgentMessage, AgentObservation, SocAction, SocObservation, SocState
+from server.datasets import search_uploaded_logs
 from server.integrations import get_splunk_client
 
 class SocAnalystEnvironment(Environment):
@@ -112,6 +113,12 @@ class SocAnalystEnvironment(Environment):
             if splunk_client is not None:
                 results = splunk_client.search(action.query or "")
                 message = str(results)[:500]
+                reward = 0.1
+                if "logs_checked" not in self._state.evidence_collected:
+                    self._state.evidence_collected.append("logs_checked")
+            elif search_uploaded_logs(action.query or "", max_results=5):
+                results = search_uploaded_logs(action.query or "", max_results=5)
+                message = f"Uploaded log hits: {str(results)[:500]}"
                 reward = 0.1
                 if "logs_checked" not in self._state.evidence_collected:
                     self._state.evidence_collected.append("logs_checked")
@@ -390,6 +397,9 @@ class SocAnalystEnvironment(Environment):
                     if splunk_client is not None:
                         results = splunk_client.search(action.query or "")
                         report = str(results)[:300]
+                    elif search_uploaded_logs(action.query or "", max_results=5):
+                        results = search_uploaded_logs(action.query or "", max_results=5)
+                        report = f"Uploaded log hits: {str(results)[:300]}"
                     else:
                         report = f"Mock logs for query={action.query or 'n/a'}"
                     if "logs_checked" not in self._state.evidence_collected:

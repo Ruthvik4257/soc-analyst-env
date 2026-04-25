@@ -13,6 +13,7 @@ from transformers import AutoTokenizer
 from trl import AutoModelForCausalLMWithValueHead, PPOConfig, PPOTrainer
 
 from models import SocAction
+from server.datasets import search_uploaded_logs
 from server.environment import SocAnalystEnvironment
 from server.integrations import execute_spl
 
@@ -64,6 +65,14 @@ def _build_supervisor_prompt(alert_details: Dict[str, Any], logs: List[Dict[str,
     )
 
 
+def _resolve_logs_for_query(query: str) -> List[Dict[str, Any]]:
+    logs = execute_spl(query)
+    if logs and not (len(logs) == 1 and "error" in logs[0]):
+        return logs
+    uploaded = search_uploaded_logs(query, max_results=10)
+    return uploaded if uploaded else logs
+
+
 def _parse_decision(text: str, default: str = "escalate_tier2") -> str:
     cleaned = text.strip().lower()
     choices = ["false_positive", "escalate_tier2", "block_if_malicious"]
@@ -101,7 +110,7 @@ def _train_single_agent_episode(
         trainer, tokenizer, loghunter_prompt, device, max_new_tokens=40
     )
     spl_query = _parse_spl(generated_text, fallback=f"search index=main {alert_details.get('id', '')}")
-    logs = execute_spl(spl_query)
+    logs = _resolve_logs_for_query(spl_query)
 
     supervisor_prompt = _build_supervisor_prompt(alert_details, logs)
     _, _, supervisor_text = _sample_text(trainer, tokenizer, supervisor_prompt, device, max_new_tokens=20)

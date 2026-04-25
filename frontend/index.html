@@ -193,6 +193,7 @@
             <div class="tabs">
                 <button class="tab active" data-view="terminal" onclick="switchView('terminal')">Terminal</button>
                 <button class="tab" data-view="integrations" onclick="switchView('integrations')">Integrations</button>
+                <button class="tab" data-view="datasets" onclick="switchView('datasets')">Datasets</button>
                 <button class="tab" data-view="training" onclick="switchView('training')">Training</button>
             </div>
         </div>
@@ -296,6 +297,23 @@
                 <button class="btn-primary" onclick="saveSplunkIntegration()">Connect Splunk</button>
             </div>
             <p id="integration-status" class="muted"></p>
+        </div>
+
+        <div id="datasets" class="view glass" style="padding:16px;">
+            <h2 style="margin-top:0;">Dataset Upload</h2>
+            <p class="muted">Upload .log/.txt/.json/.jsonl/.csv files. These logs are used when Splunk is not configured.</p>
+            <div class="row">
+                <input id="dataset-file" type="file" accept=".log,.txt,.json,.jsonl,.csv">
+                <button class="btn-primary" onclick="uploadDataset()">Upload Logs</button>
+                <button onclick="clearDataset()">Clear</button>
+            </div>
+            <div class="row" style="margin-top:8px;">
+                <input id="dataset-query" placeholder="Search uploaded logs">
+                <button onclick="searchDataset()">Search</button>
+            </div>
+            <p id="dataset-status" class="muted"></p>
+            <div class="panel-box" id="dataset-summary" style="margin-top:8px;">No uploaded logs yet.</div>
+            <div class="panel-box" id="dataset-results" style="margin-top:8px; max-height:220px; overflow-y:auto;"><em class="muted">Search results appear here.</em></div>
         </div>
 
         <div id="training" class="view glass" style="padding:16px;">
@@ -500,6 +518,54 @@
             document.getElementById("integration-status").innerText = data.message || "Splunk configuration submitted.";
         }
 
+        async function refreshDatasetSummary() {
+            const response = await fetch("/api/datasets/logs/summary");
+            const data = await response.json();
+            if (data.ok) {
+                const summary = data.summary || {};
+                document.getElementById("dataset-summary").innerText =
+                    `Total logs: ${summary.total_logs || 0} | Sources: ${JSON.stringify(summary.sources || {})}`;
+            }
+        }
+
+        async function uploadDataset() {
+            const fileInput = document.getElementById("dataset-file");
+            if (!fileInput.files || fileInput.files.length === 0) {
+                document.getElementById("dataset-status").innerText = "Choose a file first.";
+                return;
+            }
+            const file = fileInput.files[0];
+            const form = new FormData();
+            form.append("file", file);
+            const response = await fetch("/api/datasets/logs/upload", {method: "POST", body: form});
+            const data = await response.json();
+            document.getElementById("dataset-status").innerText = data.message || "Upload complete.";
+            await refreshDatasetSummary();
+        }
+
+        async function clearDataset() {
+            const response = await fetch("/api/datasets/logs/clear", {method: "POST"});
+            const data = await response.json();
+            document.getElementById("dataset-status").innerText = data.message || "Cleared.";
+            document.getElementById("dataset-results").innerHTML = "<em class='muted'>Search results appear here.</em>";
+            await refreshDatasetSummary();
+        }
+
+        async function searchDataset() {
+            const query = document.getElementById("dataset-query").value.trim();
+            const response = await fetch(`/api/datasets/logs/search?query=${encodeURIComponent(query)}&max_results=20`);
+            const data = await response.json();
+            const rows = data.rows || [];
+            if (rows.length === 0) {
+                document.getElementById("dataset-results").innerHTML = "<em class='muted'>No matches.</em>";
+            } else {
+                document.getElementById("dataset-results").innerHTML =
+                    `<pre>${rows.map(r => `[${r.source}] ${r.raw}`).join("\n")}</pre>`;
+            }
+            document.getElementById("dataset-status").innerText = `Found ${rows.length} matching logs.`;
+            await refreshDatasetSummary();
+        }
+
         async function startTraining() {
             const episodes = Number(document.getElementById("episodes").value || 10);
             const model_name = document.getElementById("model-name").value.trim() || "distilgpt2";
@@ -552,6 +618,8 @@
                 trainingPoller = null;
             }
         }
+
+        refreshDatasetSummary();
     </script>
 </body>
 </html>
