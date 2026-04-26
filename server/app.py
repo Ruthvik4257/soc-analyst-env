@@ -46,6 +46,8 @@ except Exception as exc:  # pragma: no cover - keeps API bootable when RL stack 
         per_role_last_rewards = {"supervisor": 0.0, "log_hunter": 0.0, "threat_intel": 0.0}
         report_path = ""
         training_history = []
+        finetune_on_uploaded_logs = False
+        finetune_dataset_size = 0
 
     TRAINING_STATUS = _FallbackStatus()
 
@@ -85,6 +87,18 @@ TRAINING_PRESETS = {
         "campaign_length": 30,
         "negotiation_rounds": 3,
         "seed": 42,
+    },
+    "run4_uploaded_dataset_finetune": {
+        "episodes": 6,
+        "model_name": "distilgpt2",
+        "learning_rate": 5e-6,
+        "push_to_hub": False,
+        "mode": "single_agent",
+        "campaign_length": 20,
+        "negotiation_rounds": 2,
+        "seed": 42,
+        "finetune_on_uploaded_logs": True,
+        "finetune_max_logs": 200,
     },
 }
 
@@ -162,6 +176,8 @@ def start_training(payload: dict, background_tasks: BackgroundTasks):
     campaign_length = int(payload.get("campaign_length", 20))
     negotiation_rounds = int(payload.get("negotiation_rounds", 2))
     seed = int(payload.get("seed", 42))
+    finetune_on_uploaded_logs = bool(payload.get("finetune_on_uploaded_logs", False))
+    finetune_max_logs = int(payload.get("finetune_max_logs", 200))
     background_tasks.add_task(
         run_training_loop,
         episodes,
@@ -172,13 +188,26 @@ def start_training(payload: dict, background_tasks: BackgroundTasks):
         campaign_length,
         negotiation_rounds,
         seed,
+        finetune_on_uploaded_logs,
+        finetune_max_logs,
     )
     return {
         "ok": True,
         "message": f"Training started for {episodes} episodes.",
         "model_name": model_name or "distilgpt2",
         "mode": mode,
+        "finetune_on_uploaded_logs": finetune_on_uploaded_logs,
+        "finetune_max_logs": finetune_max_logs,
     }
+
+
+@app.post("/api/train/finetune")
+def start_finetune(payload: dict, background_tasks: BackgroundTasks):
+    payload = dict(payload or {})
+    payload["finetune_on_uploaded_logs"] = True
+    if "mode" not in payload:
+        payload["mode"] = "single_agent"
+    return start_training(payload, background_tasks)
 
 
 @app.post("/api/multi/reset")
@@ -236,6 +265,8 @@ def training_status():
         "role_model_names": TRAINING_STATUS.role_model_names,
         "per_role_last_rewards": TRAINING_STATUS.per_role_last_rewards,
         "report_path": TRAINING_STATUS.report_path,
+        "finetune_on_uploaded_logs": TRAINING_STATUS.finetune_on_uploaded_logs,
+        "finetune_dataset_size": TRAINING_STATUS.finetune_dataset_size,
     }
 
 
@@ -260,6 +291,8 @@ def eval_report():
         "per_role_last_rewards": TRAINING_STATUS.per_role_last_rewards,
         "history": TRAINING_STATUS.training_history,
         "report_path": TRAINING_STATUS.report_path,
+        "finetune_on_uploaded_logs": TRAINING_STATUS.finetune_on_uploaded_logs,
+        "finetune_dataset_size": TRAINING_STATUS.finetune_dataset_size,
     }
 
 

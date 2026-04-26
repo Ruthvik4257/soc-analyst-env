@@ -49,6 +49,8 @@ class TrainingStatus:
     per_role_last_rewards: Dict[str, float] = None  # type: ignore[assignment]
     report_path: str = ""
     training_history: List[Dict[str, Any]] = None  # type: ignore[assignment]
+    finetune_on_uploaded_logs: bool = False
+    finetune_dataset_size: int = 0
 
     def __post_init__(self) -> None:
         if self.per_agent_rewards is None:
@@ -112,6 +114,78 @@ def _sample_text(trainer: Any, tokenizer: AutoTokenizer, prompt: str, device: st
     response_tensors = generated[:, query_tensors.shape[1] :]
     text = tokenizer.decode(generated[0], skip_special_tokens=True)
     return query_tensors, response_tensors, text
+
+
+def _build_uploaded_log_prompt(log_entry: Dict[str, Any]) -> str:
+    fields = log_entry.get("fields") or {}
+    fields_json = json.dumps(fields, ensure_ascii=True)
+    return (
+        "You are a SOC triage RL policy.\n"
+        "Analyze the log and output a single action with concise reason.\n"
+        "Valid actions: false_positive, escalate_tier2, block_if_malicious.\n"
+        f"Log source: {log_entry.get('source', 'uploaded')}\n"
+        f"Raw log: {log_entry.get('raw', '')}\n"
+        f"Parsed fields: {fields_json}\n"
+        "Output format: <action> | <reason>"
+    )
+
+
+def _score_uploaded_log_response(log_entry: Dict[str, Any], response_text: str) -> Tuple[float, Dict[str, Any]]:
+    text = response_text.lower()
+    decision = _parse_decision(text, default="escalate_tier2")
+    reward = 0.0
+
+    if decision in ("escalate_tier2", "block_if_malicious", "false_positive"):
+        reward += 0.4
+
+    raw = str(log_entry.get("raw", "")).lower()
+    fields = log_entry.get("fields") or {}
+    evidence_tokens = []
+    for value in fields.values():
+        token = str(value).strip().lower()
+        if token and token not in ("none", "null"):
+            evidence_tokens.append(token)
+    if raw:
+        evidence_tokens.extend([tok for tok in raw.split() if len(tok) > 4][:8])
+
+    token_hits = 0
+    for tok in evidence_tokens[:12]:
+        if tok in text:
+            token_hits += 1
+    reward += min(0.6, token_hits * 0.1)
+
+    if "reason" in text or "|" in response_text:
+        reward += 0.1
+
+    reward = max(-0.2, min(1.2, reward))
+    metrics = {
+        "coordination_efficiency": 0.0,
+        "evidence_sufficiency": min(1.0, token_hits / 6.0),
+        "per_agent_rewards": {"supervisor": reward, "log_hunter": 0.0, "threat_intel": 0.0},
+        "predicted_decision": decision,
+        "token_hits": token_hits,
+    }
+    return reward, metrics
+
+
+def _train_uploaded_log_episode(
+    trainer: Any,
+    tokenizer: AutoTokenizer,
+    device: str,
+    log_entry: Dict[str, Any],
+) -> Tuple[float, Dict[str, Any]]:
+    prompt = _build_uploaded_log_prompt(log_entry)
+    query_tensors, response_tensors, generated_text = _sample_text(
+        trainer=trainer,
+        tokenizer=tokenizer,
+        prompt=prompt,
+        device=device,
+        max_new_tokens=40,
+    )
+    reward_value, metrics = _score_uploaded_log_response(log_entry, generated_text)
+    if hasattr(trainer, "step"):
+        trainer.step([query_tensors[0]], [response_tensors[0]], [torch.tensor(reward_value, device=device)])
+    return reward_value, metrics
 
 
 def _init_role_trainers(
@@ -391,6 +465,8 @@ def run_training_loop(
     campaign_length: int = 20,
     negotiation_rounds: int = 2,
     seed: int = 42,
+    finetune_on_uploaded_logs: bool = False,
+    finetune_max_logs: int = 200,
 ) -> None:
     resolved_model_name = model_name or os.getenv("HF_MODEL_NAME", "distilgpt2")
     resolved_learning_rate = learning_rate or float(os.getenv("TRAIN_LR", "1e-5"))
@@ -423,6 +499,8 @@ def run_training_loop(
     TRAINING_STATUS.delayed_reward_success_rate = 0.0
     TRAINING_STATUS.campaign_progress = 0.0
     TRAINING_STATUS.training_history = []
+    TRAINING_STATUS.finetune_on_uploaded_logs = finetune_on_uploaded_logs
+    TRAINING_STATUS.finetune_dataset_size = 0
 
     tokenizer = AutoTokenizer.from_pretrained(resolved_model_name)
     if tokenizer.pad_token is None:
@@ -446,6 +524,12 @@ def run_training_loop(
         )
 
     difficulties = ["easy", "medium", "hard"]
+    uploaded_dataset = []
+    if finetune_on_uploaded_logs:
+        uploaded_dataset = search_uploaded_logs("", max_results=max(1, int(finetune_max_logs)))
+        TRAINING_STATUS.finetune_dataset_size = len(uploaded_dataset)
+        if not uploaded_dataset:
+            raise ValueError("No uploaded logs found. Upload dataset logs first, then retry fine-tuning.")
 
     try:
         aggregate_per_agent = {"supervisor": 0.0, "log_hunter": 0.0, "threat_intel": 0.0}
@@ -457,34 +541,44 @@ def run_training_loop(
         delayed_reward_positive_count = 0
 
         for ep in range(episodes):
-            env = SocAnalystEnvironment()
             selected_difficulty = difficulties[ep % len(difficulties)]
-            reset_obs = env.reset(difficulty=selected_difficulty, mode=training_mode)
-
-            if training_mode == "single_agent":
-                reward_value, episode_metrics = _train_single_agent_episode(
-                    trainer=trainer, tokenizer=tokenizer, env=env, reset_obs=reset_obs, device=device
+            if finetune_on_uploaded_logs:
+                log_entry = uploaded_dataset[ep % len(uploaded_dataset)]
+                reward_value, episode_metrics = _train_uploaded_log_episode(
+                    trainer=trainer,
+                    tokenizer=tokenizer,
+                    device=device,
+                    log_entry=log_entry,
                 )
             else:
-                # campaign mode currently reuses multi-agent mechanics with extended campaign horizon.
-                effective_campaign_length = campaign_length if training_mode == "campaign" else max(8, campaign_length // 2)
-                reward_value, episode_metrics = _train_multi_agent_episode(
-                    role_trainers=role_trainers or {
-                        "supervisor": trainer,
-                        "log_hunter": trainer,
-                        "threat_intel": trainer,
-                    },
-                    tokenizer=tokenizer,
-                    env=env,
-                    reset_obs=reset_obs,
-                    device=device,
-                    campaign_length=effective_campaign_length,
-                    negotiation_rounds=negotiation_rounds,
-                )
+                env = SocAnalystEnvironment()
+                reset_obs = env.reset(difficulty=selected_difficulty, mode=training_mode)
+
+                if training_mode == "single_agent":
+                    reward_value, episode_metrics = _train_single_agent_episode(
+                        trainer=trainer, tokenizer=tokenizer, env=env, reset_obs=reset_obs, device=device
+                    )
+                else:
+                    # campaign mode currently reuses multi-agent mechanics with extended campaign horizon.
+                    effective_campaign_length = campaign_length if training_mode == "campaign" else max(8, campaign_length // 2)
+                    reward_value, episode_metrics = _train_multi_agent_episode(
+                        role_trainers=role_trainers or {
+                            "supervisor": trainer,
+                            "log_hunter": trainer,
+                            "threat_intel": trainer,
+                        },
+                        tokenizer=tokenizer,
+                        env=env,
+                        reset_obs=reset_obs,
+                        device=device,
+                        campaign_length=effective_campaign_length,
+                        negotiation_rounds=negotiation_rounds,
+                    )
 
             TRAINING_STATUS.completed_episodes = ep + 1
             TRAINING_STATUS.last_reward = reward_value
-            TRAINING_STATUS.last_message = f"Episode {ep + 1}/{episodes} complete in {training_mode} mode."
+            progress_mode = "uploaded_dataset_finetune" if finetune_on_uploaded_logs else training_mode
+            TRAINING_STATUS.last_message = f"Episode {ep + 1}/{episodes} complete in {progress_mode} mode."
             if "per_role_last_rewards" in episode_metrics:
                 TRAINING_STATUS.per_role_last_rewards = episode_metrics["per_role_last_rewards"]
 
@@ -504,6 +598,7 @@ def run_training_loop(
                     "episode": ep + 1,
                     "difficulty": selected_difficulty,
                     "mode": training_mode,
+                    "finetune_on_uploaded_logs": finetune_on_uploaded_logs,
                     "reward": reward_value,
                     "coordination_efficiency": float(episode_metrics.get("coordination_efficiency", 0.0)),
                     "evidence_sufficiency": float(episode_metrics.get("evidence_sufficiency", 0.0)),
@@ -542,6 +637,8 @@ def run_training_loop(
                     role_trainer.save_pretrained(str(role_path))
         report = {
             "mode": training_mode,
+            "finetune_on_uploaded_logs": finetune_on_uploaded_logs,
+            "finetune_dataset_size": len(uploaded_dataset),
             "model_name": resolved_model_name,
             "episodes": episodes,
             "seed": seed,

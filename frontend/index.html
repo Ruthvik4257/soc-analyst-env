@@ -342,9 +342,18 @@
                 <button class="btn-primary" onclick="startTraining()">Start Training</button>
             </div>
             <div class="row" style="margin-top:8px;">
+                <label style="display:flex; align-items:center; gap:8px; padding: 0 8px; border:1px solid var(--border); border-radius:10px;">
+                    <input id="finetune-uploaded-logs" type="checkbox" style="width:auto;">
+                    Fine-tune using uploaded logs
+                </label>
+                <input id="finetune-max-logs" type="number" min="1" value="200" placeholder="max uploaded logs">
+                <button onclick="startFineTune()" class="btn-success">Start Fine-Tune</button>
+            </div>
+            <div class="row" style="margin-top:8px;">
                 <button onclick="applyTrainingPreset('run1_smoke')">Apply Run 1 (Smoke)</button>
                 <button onclick="applyTrainingPreset('run2_multi_agent')">Apply Run 2 (Multi-Agent)</button>
                 <button onclick="applyTrainingPreset('run3_campaign')">Apply Run 3 (Campaign)</button>
+                <button onclick="applyTrainingPreset('run4_uploaded_dataset_finetune')">Apply Run 4 (Dataset Fine-Tune)</button>
             </div>
             <div style="height:12px"></div>
             <div class="panel-box">
@@ -356,6 +365,7 @@
                 <div>Coordination: <span id="train-coordination">0.00</span> | Evidence: <span id="train-evidence">0.00</span></div>
                 <div>Recovery: <span id="train-recovery">0.00</span> | Memory: <span id="train-memory">0.00</span></div>
                 <div>Campaign Progress: <span id="train-campaign-progress">0.00</span> | Delayed Reward: <span id="train-delayed">0.00</span></div>
+                <div>Fine-Tune Logs: <span id="train-finetune-enabled">false</span> | Dataset Size: <span id="train-finetune-size">0</span></div>
                 <div>Per-Agent: <span id="train-agents" class="muted">supervisor=0, log_hunter=0, threat_intel=0</span></div>
                 <div>Message: <span id="train-message" class="muted">Idle</span></div>
             </div>
@@ -581,6 +591,8 @@
             const campaign_length = Number(document.getElementById("campaign-length").value || 20);
             const negotiation_rounds = Number(document.getElementById("negotiation-rounds").value || 2);
             const push_to_hub = document.getElementById("push-to-hub").checked;
+            const finetune_on_uploaded_logs = document.getElementById("finetune-uploaded-logs").checked;
+            const finetune_max_logs = Number(document.getElementById("finetune-max-logs").value || 200);
             await fetch("/api/train", {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
@@ -592,7 +604,34 @@
                     mode,
                     seed,
                     campaign_length,
-                    negotiation_rounds
+                    negotiation_rounds,
+                    finetune_on_uploaded_logs,
+                    finetune_max_logs
+                })
+            });
+            if (trainingPoller) clearInterval(trainingPoller);
+            trainingPoller = setInterval(pollTrainingStatus, 1500);
+            await pollTrainingStatus();
+        }
+
+        async function startFineTune() {
+            document.getElementById("finetune-uploaded-logs").checked = true;
+            const episodes = Number(document.getElementById("episodes").value || 10);
+            const model_name = document.getElementById("model-name").value.trim() || "distilgpt2";
+            const learning_rate = Number(document.getElementById("learning-rate").value || 0.00001);
+            const seed = Number(document.getElementById("training-seed").value || 42);
+            const push_to_hub = document.getElementById("push-to-hub").checked;
+            const finetune_max_logs = Number(document.getElementById("finetune-max-logs").value || 200);
+            await fetch("/api/train/finetune", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({
+                    episodes,
+                    model_name,
+                    learning_rate,
+                    seed,
+                    push_to_hub,
+                    finetune_max_logs
                 })
             });
             if (trainingPoller) clearInterval(trainingPoller);
@@ -619,6 +658,8 @@
             document.getElementById("campaign-length").value = p.campaign_length;
             document.getElementById("negotiation-rounds").value = p.negotiation_rounds;
             document.getElementById("push-to-hub").checked = Boolean(p.push_to_hub);
+            document.getElementById("finetune-uploaded-logs").checked = Boolean(p.finetune_on_uploaded_logs);
+            document.getElementById("finetune-max-logs").value = Number(p.finetune_max_logs || 200);
         }
 
         async function pollTrainingStatus() {
@@ -636,6 +677,8 @@
             document.getElementById("train-memory").innerText = Number(status.memory_consistency_score || 0).toFixed(2);
             document.getElementById("train-campaign-progress").innerText = Number(status.campaign_progress || 0).toFixed(2);
             document.getElementById("train-delayed").innerText = Number(status.delayed_reward_success_rate || 0).toFixed(2);
+            document.getElementById("train-finetune-enabled").innerText = String(Boolean(status.finetune_on_uploaded_logs));
+            document.getElementById("train-finetune-size").innerText = String(Number(status.finetune_dataset_size || 0));
             const p = status.per_agent_rewards || {};
             document.getElementById("train-agents").innerText =
                 `supervisor=${Number(p.supervisor || 0).toFixed(2)}, log_hunter=${Number(p.log_hunter || 0).toFixed(2)}, threat_intel=${Number(p.threat_intel || 0).toFixed(2)}`;
